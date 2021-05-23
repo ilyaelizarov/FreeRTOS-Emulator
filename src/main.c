@@ -14,7 +14,9 @@
 // #include "TUM_Ball.h"
 #include "TUM_Draw.h"
 #include "TUM_Utils.h"
-/* #include "TUM_Event.h"
+#include "TUM_Event.h"
+#include "TUM_Font.h"
+/*
 #include "TUM_Sound.h"
 #include "TUM_Utils.h"
 #include "TUM_Font.h"
@@ -25,7 +27,10 @@
 #define mainGENERIC_PRIORITY (tskIDLE_PRIORITY)
 #define mainGENERIC_STACK_SIZE ((unsigned short)200)
 
-
+static TaskHandle_t BufferSwap = NULL;
+/*static SemaphoreHandle_t ScreenLock = NULL;
+static SemaphoreHandle_t DrawSignal = NULL;
+*/
 
 /* Structure that will hold the TCB of the task being created. */
 StaticTask_t xTaskBuffer;
@@ -85,6 +90,54 @@ void xGetButtonInput(void)
 #define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
 */
 
+#define FPS_AVERAGE_COUNT 50
+
+void vDrawFPS(void) {
+    static unsigned int periods[FPS_AVERAGE_COUNT] = { 0 };
+    static unsigned int periods_total = 0;
+    static unsigned int index = 0;
+    static unsigned int average_count = 0;
+    static TickType_t xLastWakeTime = 0, prevWakeTime = 0;
+    static char str[10] = { 0 };
+    static int text_width;
+    int fps = 0;
+
+    if (average_count < FPS_AVERAGE_COUNT) {
+        average_count++;
+    }
+    else {
+        periods_total -= periods[index];
+    }
+
+    xLastWakeTime = xTaskGetTickCount();
+
+    if (prevWakeTime != xLastWakeTime) {
+        periods[index] =
+            configTICK_RATE_HZ / (xLastWakeTime - prevWakeTime);
+        prevWakeTime = xLastWakeTime;
+    }
+    else {
+        periods[index] = 0;
+    }
+
+    periods_total += periods[index];
+
+    if (index == (FPS_AVERAGE_COUNT - 1)) {
+        index = 0;
+    }
+    else {
+        index++;
+    }
+
+    fps = periods_total / average_count;
+
+    sprintf(str, "FPS: %2d", fps);
+
+    tumDrawText(str, SCREEN_WIDTH/2,
+                              SCREEN_HEIGHT - DEFAULT_FONT_SIZE * 1.5,
+                              Skyblue);
+                              
+}
 
 // Draws a filled circle with constant diameter at given coordinates
 void putCircleAt(coord_t * points) {
@@ -129,16 +182,16 @@ void vCircleBlink2(void *pvParameters) {
         SCREEN_HEIGHT/2
     };
 
-    tumDrawBindThread(); // Drawing control
+ //   tumDrawBindThread(); // Drawing control
 
     while (1) {
         // Draw a circle in the middle of the screen
         putCircleAt(&circle_coord);
-        tumDrawUpdateScreen();
+ //       tumDrawUpdateScreen();
 
         vTaskDelay((TickType_t)250);
         tumDrawClear(White);
-        tumDrawUpdateScreen();
+//        tumDrawUpdateScreen();
 
         vTaskDelay((TickType_t)250);
 
@@ -146,6 +199,29 @@ void vCircleBlink2(void *pvParameters) {
 
     }
 }
+
+
+void vSwapBuffers(void *pvParameters)
+{
+    TickType_t xLastWakeTime;
+    xLastWakeTime = xTaskGetTickCount();
+    const TickType_t frameratePeriod = 1;
+
+    tumDrawBindThread(); // Setup Rendering handle with correct GL context
+
+    while (1) {
+                        vDrawFPS();
+            tumDrawUpdateScreen();
+  /*          tumEventFetchEvents(FETCH_EVENT_BLOCK);
+            xSemaphoreGive(ScreenLock);
+            xSemaphoreGive(DrawSignal);*/
+            vTaskDelayUntil(&xLastWakeTime,
+                            pdMS_TO_TICKS(frameratePeriod));
+        //}
+    }
+}
+
+
 
 /*
 void vDemoTask(void *pvParameters)
@@ -234,10 +310,11 @@ int main(int argc, char *argv[]) {
     }
 */
 
+    xTaskCreate(vSwapBuffers, "BufferSwapTask", mainGENERIC_STACK_SIZE, NULL, configMAX_PRIORITIES, BufferSwap);
 
     xTaskCreate(vCircleBlink1, "Blinks1Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY + 1, NULL);
 
-    xTaskCreateStatic(vCircleBlink2, "Blinks2Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY, xStack, &xTaskBuffer);
+    xTaskCreateStatic(vCircleBlink2, "Blinks2Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY , xStack, &xTaskBuffer);
    
     vTaskStartScheduler();
 
