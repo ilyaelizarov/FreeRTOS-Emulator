@@ -42,6 +42,12 @@ void xGetButtonInput(void)
 
 #define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
 
+
+void vCircleBlink1(void) {
+    
+}
+
+
 void vDemoTask(void *pvParameters)
 {
     // structure to store time retrieved from Linux kernel
