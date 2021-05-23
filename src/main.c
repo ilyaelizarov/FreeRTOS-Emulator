@@ -11,18 +11,60 @@
 #include "semphr.h"
 #include "task.h"
 
-#include "TUM_Ball.h"
+// #include "TUM_Ball.h"
 #include "TUM_Draw.h"
-#include "TUM_Event.h"
+#include "TUM_Utils.h"
+/* #include "TUM_Event.h"
 #include "TUM_Sound.h"
 #include "TUM_Utils.h"
 #include "TUM_Font.h"
 
+
 #include "AsyncIO.h"
-
+*/
 #define mainGENERIC_PRIORITY (tskIDLE_PRIORITY)
-#define mainGENERIC_STACK_SIZE ((unsigned short)2560)
+#define mainGENERIC_STACK_SIZE ((unsigned short)200)
 
+
+
+/* Structure that will hold the TCB of the task being created. */
+StaticTask_t xTaskBuffer;
+
+/* Buffer that the task being created will use as its stack.  Note this is
+an array of StackType_t variables.  The size of StackType_t is dependent on
+the RTOS port. */
+StackType_t xStack[ mainGENERIC_STACK_SIZE ];
+
+
+/* configSUPPORT_STATIC_ALLOCATION is set to 1, so the application must provide an
+implementation of vApplicationGetIdleTaskMemory() to provide the memory that is
+used by the Idle task. */
+void vApplicationGetIdleTaskMemory( StaticTask_t **ppxIdleTaskTCBBuffer,
+                                    StackType_t **ppxIdleTaskStackBuffer,
+                                    uint32_t *pulIdleTaskStackSize )
+{
+/* If the buffers to be provided to the Idle task are declared inside this
+function then they must be declared static - otherwise they will be allocated on
+the stack and so not exists after this function exits. */
+static StaticTask_t xIdleTaskTCB;
+static StackType_t uxIdleTaskStack[ configMINIMAL_STACK_SIZE ];
+
+    /* Pass out a pointer to the StaticTask_t structure in which the Idle task's
+    state will be stored. */
+    *ppxIdleTaskTCBBuffer = &xIdleTaskTCB;
+
+    /* Pass out the array that will be used as the Idle task's stack. */
+    *ppxIdleTaskStackBuffer = uxIdleTaskStack;
+
+    /* Pass out the size of the array pointed to by *ppxIdleTaskStackBuffer.
+    Note that, as the array is necessarily of type StackType_t,
+    configMINIMAL_STACK_SIZE is specified in words, not bytes. */
+    *pulIdleTaskStackSize = configMINIMAL_STACK_SIZE;
+}
+/*-----------------------------------------------------------*/
+
+
+/*
 static TaskHandle_t DemoTask = NULL;
 
 typedef struct buttons_buffer {
@@ -41,13 +83,71 @@ void xGetButtonInput(void)
 }
 
 #define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
+*/
 
 
-void vCircleBlink1(void) {
+// Draws a filled circle with constant diameter at given coordinates
+void putCircleAt(coord_t * points) {
     
+    // Circle diameter
+    const short diameter = 80 / 2;
+
+    tumDrawCircle(points->x, points->y, diameter, Red);
+
 }
 
+// Blinks with 1 Hz
+void vCircleBlink1(void *pvParameters) {
 
+    coord_t circle_coord = {
+        SCREEN_WIDTH/2 + SCREEN_WIDTH/6,
+        SCREEN_HEIGHT/2
+    };
+
+  // tumDrawBindThread(); // Drawing control
+
+    while (1) {
+
+        // Draw a circle in the middle of the screen
+        putCircleAt(&circle_coord);
+  //      tumDrawUpdateScreen();
+        vTaskDelay((TickType_t)500);
+        tumDrawClear(White);
+   //     tumDrawUpdateScreen();
+
+        vTaskDelay((TickType_t)500);
+
+  //              tumDrawUpdateScreen();
+    }
+}
+
+// Blinks with 2 Hz
+void vCircleBlink2(void *pvParameters) {
+
+    coord_t circle_coord = {
+        SCREEN_WIDTH/2 -  SCREEN_WIDTH/6,
+        SCREEN_HEIGHT/2
+    };
+
+    tumDrawBindThread(); // Drawing control
+
+    while (1) {
+        // Draw a circle in the middle of the screen
+        putCircleAt(&circle_coord);
+        tumDrawUpdateScreen();
+
+        vTaskDelay((TickType_t)250);
+        tumDrawClear(White);
+        tumDrawUpdateScreen();
+
+        vTaskDelay((TickType_t)250);
+
+     
+
+    }
+}
+
+/*
 void vDemoTask(void *pvParameters)
 {
     // structure to store time retrieved from Linux kernel
@@ -103,9 +203,10 @@ void vDemoTask(void *pvParameters)
         vTaskDelay((TickType_t)1000);
     }
 }
+*/
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
+
     char *bin_folder_path = tumUtilGetBinFolderPath(argv[0]);
 
     printf("Initializing: ");
@@ -115,6 +216,7 @@ int main(int argc, char *argv[])
         goto err_init_drawing;
     }
 
+/*
     if (tumEventInit()) {
         PRINT_ERROR("Failed to initialize events");
         goto err_init_events;
@@ -130,16 +232,18 @@ int main(int argc, char *argv[])
         PRINT_ERROR("Failed to create buttons lock");
         goto err_buttons_lock;
     }
+*/
 
-    if (xTaskCreate(vDemoTask, "DemoTask", mainGENERIC_STACK_SIZE * 2, NULL,
-                    mainGENERIC_PRIORITY, &DemoTask) != pdPASS) {
-        goto err_demotask;
-    }
 
+    xTaskCreate(vCircleBlink1, "Blinks1Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY + 1, NULL);
+
+    xTaskCreateStatic(vCircleBlink2, "Blinks2Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY, xStack, &xTaskBuffer);
+   
     vTaskStartScheduler();
 
     return EXIT_SUCCESS;
 
+/*
 err_demotask:
     vSemaphoreDelete(buttons.lock);
 err_buttons_lock:
@@ -148,6 +252,7 @@ err_init_audio:
     tumEventExit();
 err_init_events:
     tumDrawExit();
+*/
 err_init_drawing:
     return EXIT_FAILURE;
 }
