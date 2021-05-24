@@ -23,14 +23,16 @@
 #define mainGENERIC_PRIORITY (tskIDLE_PRIORITY)
 #define mainGENERIC_STACK_SIZE ((unsigned short)2560)
 
-#define DEBOUNCE_DELAY 300
-
+// Converts degrees to radians
 #define degToRad(angleInDegrees) ((angleInDegrees) * M_PI / 180.0)
 
 static TaskHandle_t DemoTask = NULL;
 
+// Coordinates displacement for moving the screen
+short displacement_X = 0;
+short displacement_Y = 0;
 
-
+// Buffer for the buttons
 typedef struct buttons_buffer {
     unsigned char buttons[SDL_NUM_SCANCODES];
     SemaphoreHandle_t lock;
@@ -55,7 +57,6 @@ TickType_t buttons_last_change;
 // Counters for keystrokers 
 int count_A, count_B, count_C, count_D;
 
-
 /* Prevents buttons from bouncing:
  * returns 1 if debouncing has been achieved,
  * and 0 if it can't be achieved */
@@ -77,6 +78,11 @@ void vDrawButtonText(void) {
 
     static char str[100] = { 0 };
 
+    // Prints cursor's coordinates 
+    sprintf(str, "Axis X: %5d | Axis Y: %5d", tumEventGetMouseX(),
+        tumEventGetMouseY());
+    tumDrawText(str, 10 + + displacement_X, DEFAULT_FONT_SIZE * 0.5 + + displacement_Y, Black);
+
     if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
 
         if (buttons.buttons[KEYCODE(A)] && DebouncingCondition()) 
@@ -93,45 +99,64 @@ void vDrawButtonText(void) {
 
         xSemaphoreGive(buttons.lock);
 
-        tumDrawText(str, 10, DEFAULT_FONT_SIZE, Black);
+        tumDrawText(str, 10 + + displacement_X, DEFAULT_FONT_SIZE * 2 + + displacement_Y, Black);
     }
-
 }
 
 // Draws a triangle at given coordinates
-void putTriangleAt(coord_t * points) {
+void putTriangleAt(coord_t points) {
 
     // Triangle size
     const short triangle_half_base = 64;
     const short triangle_height = 80;
 
     coord_t coord_triangle[3]= {
-            {points->x - triangle_half_base, points->y + triangle_height/2},
-            {points->x, points->y -triangle_height/2},
-            {points->x + triangle_half_base, points->y + triangle_height/2},
+            {points.x - triangle_half_base, points.y + triangle_height/2},
+            {points.x, points.y -triangle_height/2},
+            {points.x + triangle_half_base, points.y + triangle_height/2},
     };
 
-    tumDrawTriangle(coord_triangle,Black);   
+    tumDrawTriangle(coord_triangle, Black);   
 
 }
 
 // Draws a circle at given coordinates
-void putCircleAt(coord_t * points) {
+void putCircleAt(coord_t points) {
     // Circle diameter
     const short diameter = 45;
 
-    tumDrawCircle(points->x, points->y, diameter, Red);
+    tumDrawCircle(points.x, points.y, diameter, Red);
 
 }
 
 // Draws a squre at given coordingates
-void putSquareAt(coord_t * points) {
+void putSquareAt(coord_t points) {
 
     // Square size
     const short width = 80;
     const short height = width;
 
-    tumDrawFilledBox(points->x-width/2,points->y-height/2,width,height,Blue);
+    tumDrawFilledBox(points.x-width/2,points.y-height/2,width,height,Blue);
+}
+
+// Prints the description how to use the program
+void vDrawHelpText(void)
+{
+    static char str[100] = { 0 };
+
+    sprintf(str, "1. To move the screen, click on any point,");
+    tumDrawText(str, SCREEN_WIDTH - 640/2 - 50, DEFAULT_FONT_SIZE * 0 , Red);
+    sprintf(str, "hold the left button on the mouse and drag anywhere");
+    tumDrawText(str, SCREEN_WIDTH - 640/2 - 50, DEFAULT_FONT_SIZE * 1, Red);
+    sprintf(str, "2. To reset the counter for pushing the buttons");
+    tumDrawText(str, SCREEN_WIDTH - 640/2 - 50, DEFAULT_FONT_SIZE * 2, Red);
+    sprintf(str, "do the right click");
+    tumDrawText(str, SCREEN_WIDTH - 640/2 -50, DEFAULT_FONT_SIZE * 3, Red);
+}
+
+void vDrawStaticItems(void)
+{
+    vDrawHelpText();
 }
 
 void vDemoTask(void *pvParameters)
@@ -142,25 +167,22 @@ void vDemoTask(void *pvParameters)
     // backend.
     tumDrawBindThread();
 
+    // Initial coordinates of the cursor
+    short initMouse_X;
+    short initMouse_Y;
 
+    // Flag to activate the screen movement
+    uint8_t mouseFlag;
 
-    // Inital coordinates
-    coord_t triangle_coord= {
-        SCREEN_WIDTH/2,
-        SCREEN_HEIGHT/2
-    };
-    coord_t circle_coord = {
-        SCREEN_WIDTH/2 - 120,
-        SCREEN_HEIGHT/2
-    };
-    coord_t square_coord = {
-        SCREEN_WIDTH/2 + 120,
-        SCREEN_HEIGHT/2
-    };
+    // To hold coordinates of the figures
+    coord_t triangle_coord;
+    coord_t circle_coord;
+    coord_t square_coord;
 
-    // Radians
+    // Polar angle
     double deg = 0;
 
+    // Flag for the first run
     uint8_t firstRun = 0;
 
     while (1) {
@@ -182,26 +204,49 @@ void vDemoTask(void *pvParameters)
 
         
 
-
-
-
         tumDrawClear(White); // Clear screen
+        vDrawStaticItems(); // Print help
 
         vDrawButtonText(); // Print keystrokes
 
-        circle_coord.x = SCREEN_WIDTH/2  - 120 * cos(degToRad(deg));
-        circle_coord.y = SCREEN_HEIGHT/2 - 120 * sin(degToRad(deg));
-        square_coord.x = SCREEN_WIDTH/2  + 120 * cos(degToRad(deg));
-        square_coord.y = SCREEN_HEIGHT/2  + 120 * sin(degToRad(deg));
+        // Reset keystrokes counters if the mouse is right-clicked
+        if (tumEventGetMouseRight()) {
+            count_A = 0;
+            count_B = 0;
+            count_C = 0;
+            count_D = 0;
+        }
 
-    
+        // Reset the drag when the mouse is not left-clicked
+        if (!tumEventGetMouseLeft())
+            mouseFlag = 0;
 
-        putTriangleAt(&triangle_coord);
-        
+        // Activate screen moving if the mouse is left-clicked
+        if (tumEventGetMouseLeft() && !mouseFlag) {
+            // Get initial coordinates
+            initMouse_X = tumEventGetMouseX() - displacement_X;
+            initMouse_Y = tumEventGetMouseY() - displacement_Y;
+            mouseFlag = 1;
+        }
 
-        
-        putCircleAt(&circle_coord);
-        putSquareAt(&square_coord);
+        // Calculate the displacement
+        if (mouseFlag) {
+            displacement_X= tumEventGetMouseX() - initMouse_X;
+            displacement_Y= tumEventGetMouseY() - initMouse_Y;
+        }
+
+        // Coordinates of the figures
+        circle_coord.x = SCREEN_WIDTH/2  - 120 * cos(degToRad(deg)) + displacement_X;
+        circle_coord.y = SCREEN_HEIGHT/2 - 120 * sin(degToRad(deg)) + displacement_Y;
+        square_coord.x = SCREEN_WIDTH/2  + 120 * cos(degToRad(deg))  + displacement_X;
+        square_coord.y = SCREEN_HEIGHT/2  + 120 * sin(degToRad(deg)) + displacement_Y;
+        triangle_coord.x = SCREEN_WIDTH/2 + displacement_X;
+        triangle_coord.y = SCREEN_HEIGHT/2 + displacement_Y;
+
+        // Draw the figures
+        putTriangleAt(triangle_coord);
+        putCircleAt(circle_coord);
+        putSquareAt(square_coord);
 
         // Increment degrees for clockwise motion of the figures
         deg++;
@@ -221,7 +266,6 @@ void vDemoTask(void *pvParameters)
 
         tumDrawUpdateScreen(); // Refresh the screen to draw string
 
-        // Basic sleep of 1000 milliseconds
         if (!firstRun)
             vTaskDelay((TickType_t)500);
 
@@ -229,6 +273,8 @@ void vDemoTask(void *pvParameters)
         firstRun = 1;
     }
 }
+
+
 
 int main(int argc, char *argv[])
 {
