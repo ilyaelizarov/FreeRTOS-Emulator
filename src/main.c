@@ -22,10 +22,14 @@
 
 #define mainGENERIC_PRIORITY (tskIDLE_PRIORITY)
 #define mainGENERIC_STACK_SIZE ((unsigned short)2560)
+
+#define DEBOUNCE_DELAY 300
+
 #define degToRad(angleInDegrees) ((angleInDegrees) * M_PI / 180.0)
-#define radToDeg(angleInRadians) ((angleInRadians) * 180.0 / M_PI)
 
 static TaskHandle_t DemoTask = NULL;
+
+
 
 typedef struct buttons_buffer {
     unsigned char buttons[SDL_NUM_SCANCODES];
@@ -43,10 +47,61 @@ void xGetButtonInput(void)
 }
 
 #define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
+#define buttons_DEBOUNCE_DELAY	( 200 / portTICK_RATE_MS )
 
-// Draws a trangle with constant size at given coordinates
+// Stores last time when a button was pressed
+TickType_t buttons_last_change;
+
+// Counters for keystrokers 
+int count_A, count_B, count_C, count_D;
+
+
+/* Prevents buttons from bouncing:
+ * returns 1 if debouncing has been achieved,
+ * and 0 if it can't be achieved */
+uint8_t DebouncingCondition (void) {
+
+    const int buttons_change_period = buttons_DEBOUNCE_DELAY;
+
+    if (xTaskGetTickCount() - buttons_last_change > buttons_change_period) {
+        buttons_last_change = xTaskGetTickCount();
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+/* Counts how many times A, B, C and D have been pushed,
+ * then prints the output on the screen */
+void vDrawButtonText(void) {
+
+    static char str[100] = { 0 };
+
+    if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+
+        if (buttons.buttons[KEYCODE(A)] && DebouncingCondition()) 
+            count_A++;
+        if (buttons.buttons[KEYCODE(B)] && DebouncingCondition())
+            count_B++;
+        if (buttons.buttons[KEYCODE(C)] && DebouncingCondition())
+            count_C++;
+        if (buttons.buttons[KEYCODE(D)] && DebouncingCondition())
+            count_D++;
+        
+        sprintf(str, "A: %d | B: %d | C: %d | D: %d",
+            count_A, count_B, count_C, count_D);
+
+        xSemaphoreGive(buttons.lock);
+
+        tumDrawText(str, 10, DEFAULT_FONT_SIZE, Black);
+    }
+
+}
+
+// Draws a triangle at given coordinates
 void putTriangleAt(coord_t * points) {
-    // Triangle coordinates
+
+    // Triangle size
     const short triangle_half_base = 64;
     const short triangle_height = 80;
 
@@ -60,17 +115,19 @@ void putTriangleAt(coord_t * points) {
 
 }
 
-// Draws a circle with constant diameter at given coordinates
+// Draws a circle at given coordinates
 void putCircleAt(coord_t * points) {
     // Circle diameter
-    const short diameter = 80 / 2;
+    const short diameter = 45;
 
     tumDrawCircle(points->x, points->y, diameter, Red);
 
 }
 
-// Draws a squre with constant side at given coordingates
+// Draws a squre at given coordingates
 void putSquareAt(coord_t * points) {
+
+    // Square size
     const short width = 80;
     const short height = width;
 
@@ -84,6 +141,8 @@ void vDemoTask(void *pvParameters)
     // the drawing functions to draw objects. This is a limitation of the SDL
     // backend.
     tumDrawBindThread();
+
+
 
     // Inital coordinates
     coord_t triangle_coord= {
@@ -102,11 +161,12 @@ void vDemoTask(void *pvParameters)
     // Radians
     double deg = 0;
 
-    int flag_task21 = 0;
+    uint8_t firstRun = 0;
 
     while (1) {
         tumEventFetchEvents(FETCH_EVENT_NONBLOCK); // Query events backend for new events, ie. button presses
         xGetButtonInput(); // Update global input
+
 
         // `buttons` is a global shared variable and as such needs to be
         // guarded with a mutex, mutex must be obtained before accessing the
@@ -126,6 +186,8 @@ void vDemoTask(void *pvParameters)
 
 
         tumDrawClear(White); // Clear screen
+
+        vDrawButtonText(); // Print keystrokes
 
         circle_coord.x = SCREEN_WIDTH/2  - 120 * cos(degToRad(deg));
         circle_coord.y = SCREEN_HEIGHT/2 - 120 * sin(degToRad(deg));
@@ -160,11 +222,11 @@ void vDemoTask(void *pvParameters)
         tumDrawUpdateScreen(); // Refresh the screen to draw string
 
         // Basic sleep of 1000 milliseconds
-        if (!flag_task21)
-            vTaskDelay((TickType_t)1000);
+        if (!firstRun)
+            vTaskDelay((TickType_t)500);
 
         vTaskDelay((TickType_t)50);
-        flag_task21 = 1;
+        firstRun = 1;
     }
 }
 
