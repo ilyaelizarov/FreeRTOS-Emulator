@@ -26,7 +26,7 @@
 // Converts degrees to radians
 #define degToRad(angleInDegrees) ((angleInDegrees) * M_PI / 180.0)
 
-static TaskHandle_t DemoTask = NULL;
+static TaskHandle_t Exercise2 = NULL;
 
 // Coordinates displacement for moving the screen
 short displacement_X = 0;
@@ -99,7 +99,7 @@ void vDrawButtonText(void) {
 
         xSemaphoreGive(buttons.lock);
 
-        tumDrawText(str, 10 + + displacement_X, DEFAULT_FONT_SIZE * 2 + + displacement_Y, Black);
+        tumDrawText(str, 10 + displacement_X, DEFAULT_FONT_SIZE * 2 + displacement_Y, Black);
     }
 }
 
@@ -159,7 +159,7 @@ void vDrawStaticItems(void)
     vDrawHelpText();
 }
 
-void vDemoTask(void *pvParameters)
+void vExercise2(void *pvParameters)
 {
     // Needed such that Gfx library knows which thread controlls drawing
     // Only one thread can call tumDrawUpdateScreen while and thread can call
@@ -303,8 +303,8 @@ int main(int argc, char *argv[])
         goto err_buttons_lock;
     }
 
-    if (xTaskCreate(vDemoTask, "DemoTask", mainGENERIC_STACK_SIZE * 2, NULL,
-                    mainGENERIC_PRIORITY, &DemoTask) != pdPASS) {
+    if (xTaskCreate(vExercise2, "Exercise2", mainGENERIC_STACK_SIZE * 2, NULL,
+                    mainGENERIC_PRIORITY, &Exercise2) != pdPASS) {
         goto err_demotask;
     }
 
