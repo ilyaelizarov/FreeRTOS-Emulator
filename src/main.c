@@ -25,6 +25,9 @@ static TaskHandle_t BufferSwap = NULL;
 // Handles for the tasks
 static TaskHandle_t SwitchingTask1, SwitchingTask2;
 
+// Handles for the tasks for incrementing a variable
+static TaskHandle_t IncrementVariable;
+
 /* A protected variable for counting button's pushes
    when we switch between the tasks in exercise 3.2.3 */
 typedef struct switchingButtonCounter {
@@ -37,11 +40,21 @@ switchingButtonCounter_t buttonCounter = { 0 };
 // Stores last time when a button was pressed
 TickType_t buttons_last_change;
 
+// A variable to be incremented (task 3.2.4)
+int variableToIncrement = 0;
+
 // Semaphore to resume vSwitchingTask1 in exercise 3.2.3
 SemaphoreHandle_t semSwitchingTask1 = NULL;
 
 // State for the state machine for toggling tasks in exercise 3.2.3
 uint8_t toggle_tasks = 0;
+
+// Contains the thread that made the last change to the variable counting the keystrokes for exercise 3.2.3 
+#define THREAD_SEMAPHORE 0
+#define THREAD_NOTIFICATION 1
+#define THREAD_TIMER 3
+#define INITIAL_VALUE 4
+uint8_t buttonCalledBy = INITIAL_VALUE;
 
 /* configSUPPORT_STATIC_ALLOCATION is set to 1, so the application must provide an
 implementation of vApplicationGetIdleTaskMemory() to provide the memory that is
@@ -173,9 +186,30 @@ uint8_t DebouncingCondition (void) {
 void vDrawButtonTextSwitching(void) {
 
 	static char str[100] = { 0 };
+    static char * calledBy;
+
+    switch(buttonCalledBy) {
+        case THREAD_NOTIFICATION:
+            calledBy = "called by notification";
+            break;
+        case THREAD_SEMAPHORE:
+            calledBy = "called by semaphore";
+            break;
+        case THREAD_TIMER:
+            calledBy = "called by timer";
+            break;
+        case INITIAL_VALUE:
+            calledBy = "initial value";
+            break;
+        default:
+            break;
+    }
 	
+    // Clear the button's counter text
+    tumDrawFilledBox(0, SCREEN_HEIGHT - DEFAULT_FONT_SIZE * 2, 250, DEFAULT_FONT_SIZE *2,White);
+
 	// Prints the S button counter
-	sprintf(str, "S: %d", buttonCounter.counter);
+	sprintf(str, "S: %d (%s)", buttonCounter.counter, calledBy);
 	tumDrawText(str, 10, SCREEN_HEIGHT - DEFAULT_FONT_SIZE * 2, Black);
 
 	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
@@ -183,6 +217,7 @@ void vDrawButtonTextSwitching(void) {
 		// Toggles counting tasks when S is pressed (task 3.2.3)
 		if (buttons.buttons[KEYCODE(S)] && DebouncingCondition()) {
 			
+            // Toggles between the vSwitchingTask1 and vSwitchingTask2
 			toggle_tasks++;
 			
 			if (toggle_tasks == 2)
@@ -194,7 +229,7 @@ void vDrawButtonTextSwitching(void) {
 					xSemaphoreGive(semSwitchingTask1);
 					break;
 					
-				// Resume the second task with a 
+				// Resume the second task with a notification
 				case 1:
 					xTaskNotify(SwitchingTask2, 0, eNoAction);
 					break;
@@ -203,11 +238,38 @@ void vDrawButtonTextSwitching(void) {
 					break;
 			}
 		}
+
+        // Trigger the vIncrementVariable task with T button
+        if (buttons.buttons[KEYCODE(T)] && DebouncingCondition()) {
+
+        	if (eTaskGetState(IncrementVariable) == eSuspended)
+		        vTaskResume(IncrementVariable);
+	        else
+		        vTaskSuspend(IncrementVariable);
+
+}
 			
 		xSemaphoreGive(buttons.lock);
 	
 	}
 }
+
+// Print the incremented variable
+void vDrawTextIncrementedVar(void) {
+
+	static char str[100] = { 0 };
+
+	// Clear the button's counter text
+//    tumDrawFilledBox(0, SCREEN_HEIGHT - DEFAULT_FONT_SIZE * 2, 250, DEFAULT_FONT_SIZE *2,White);
+
+	// Print the counter
+	sprintf(str, "Variable incremented every second: %d", variableToIncrement);
+	tumDrawText(str, SCREEN_WIDTH - 280, SCREEN_HEIGHT - DEFAULT_FONT_SIZE * 2, Black);
+
+}
+
+
+
 
 // Blinks with 1 Hz
 void vCircleBlink1(void *pvParameters) {
@@ -222,6 +284,7 @@ void vCircleBlink1(void *pvParameters) {
     while (1) {
 
         // Draw a circle in the middle of the screen
+        
         putCircleAt(&circle_coord);
   //      tumDrawUpdateScreen();
         vTaskDelay(500 / portTICK_RATE_MS);
@@ -246,6 +309,7 @@ void vCircleBlink2(void *pvParameters) {
 
     while (1) {
         // Draw a circle in the middle of the screen
+        
         putCircleAt(&circle_coord);
         vTaskDelay(250 / portTICK_RATE_MS);
         tumDrawClear(White);
@@ -253,6 +317,7 @@ void vCircleBlink2(void *pvParameters) {
     }
 }
 
+// Refreshes the screen
 void vSwapBuffers(void *pvParameters) {
 
     TickType_t xLastWakeTime;
@@ -265,6 +330,7 @@ void vSwapBuffers(void *pvParameters) {
             tumEventFetchEvents(FETCH_EVENT_NONBLOCK); // Query events backend for new events, ie. button presses
             xGetButtonInput(); // Update global input
             vDrawButtonTextSwitching();
+            vDrawTextIncrementedVar();
             vDrawFPS();
 
             tumDrawUpdateScreen();
@@ -283,6 +349,8 @@ void vSwitchingTask1 (void *pvParameters) {
 			if (xSemaphoreTake(buttonCounter.lock, 0) == pdPASS) {
 				buttonCounter.counter++;
 				xSemaphoreGive(buttonCounter.lock);
+
+                buttonCalledBy = THREAD_SEMAPHORE;
 			}
 		}
 	}
@@ -299,6 +367,8 @@ void vSwitchingTask2 (void *pvParameters) {
 		if (xSemaphoreTake(buttonCounter.lock, 0) == pdPASS) {
 			buttonCounter.counter++;
 			xSemaphoreGive(buttonCounter.lock);
+
+            buttonCalledBy = THREAD_NOTIFICATION;
 		}
 	}
 }
@@ -306,21 +376,34 @@ void vSwitchingTask2 (void *pvParameters) {
 // The task that resets the button's counter
 void vSwitchingTimer (void *pvParameters) {
 
-    TickType_t xLastWakeTimeTimer;
+    TickType_t xLastWakeTime;
 
-    xLastWakeTimeTimer = xTaskGetTickCount();
+    xLastWakeTime = xTaskGetTickCount();
 
 	while(1) {
+
+
+        vTaskDelayUntil(&xLastWakeTime, 15000 / portTICK_RATE_MS);
+
+
 		if (xSemaphoreTake(buttonCounter.lock, 0) == pdPASS) {
 			buttonCounter.counter = 0;	
 			xSemaphoreGive(buttonCounter.lock);
+
+            buttonCalledBy = THREAD_TIMER;
+
 		}
-
-        vTaskDelayUntil(&xLastWakeTimeTimer, 10000 / portTICK_RATE_MS);
-
 	}
-    
+}
 
+// The task that increases a variable every second
+void vIncrementVariable (void *pvParameters) {
+	
+	while(1) {
+	
+        vTaskDelay(1000 / portTICK_RATE_MS);
+		variableToIncrement++;
+	}	
 }
 
 int main(int argc, char *argv[]) {
@@ -329,18 +412,20 @@ int main(int argc, char *argv[]) {
 
 
     tumDrawInit(bin_folder_path); // Inialize drawing
+    tumDrawClear(White);
     tumEventInit(); // Initalize events
 
     semSwitchingTask1 = xSemaphoreCreateBinary(); // Locking mechanism for the first task in the exercise 3.2.3
     buttonCounter.lock = xSemaphoreCreateMutex(); // Mutex to protect buttonCounter.counter
     buttons.lock = xSemaphoreCreateMutex(); // Locking mechanism for buttons
 
-    xTaskCreate(vSwapBuffers, "BufferSwapTask", mainGENERIC_STACK_SIZE, NULL, configMAX_PRIORITIES, BufferSwap);
-    xTaskCreate(vCircleBlink1, "Blinks1Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY + 1, NULL);
+    xTaskCreate(vSwapBuffers, "BufferSwapTask", mainGENERIC_STACK_SIZE, NULL, configMAX_PRIORITIES, BufferSwap); // highest priority
+    xTaskCreate(vCircleBlink1, "Blinks1Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY + 1, NULL); // normal priority
     xTaskCreateStatic(vCircleBlink2, "Blinks2Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY , xStack, &xTaskBuffer);
-    xTaskCreate(vSwitchingTask1, "SwitchingTask1", mainGENERIC_STACK_SIZE, NULL, tskIDLE_PRIORITY, &SwitchingTask1);
-    xTaskCreate(vSwitchingTask2, "SwitchingTask2", mainGENERIC_STACK_SIZE, NULL, tskIDLE_PRIORITY, &SwitchingTask2);
-    xTaskCreate(vSwitchingTimer, "SwitchingTimer", mainGENERIC_STACK_SIZE, NULL, tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreate(vSwitchingTask1, "SwitchingTask1", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY, &SwitchingTask1);
+    xTaskCreate(vSwitchingTask2, "SwitchingTask2", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY +1, &SwitchingTask2);
+    xTaskCreate(vSwitchingTimer, "SwitchingTimer", mainGENERIC_STACK_SIZE, NULL, configMAX_PRIORITIES - 1, NULL); // higher priority
+    xTaskCreate(vIncrementVariable, "IncrementVariable", mainGENERIC_STACK_SIZE, NULL, configMAX_PRIORITIES - 1, &IncrementVariable);
 
     vTaskStartScheduler();
 
