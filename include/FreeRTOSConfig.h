@@ -87,10 +87,16 @@
 #define configQUEUE_REGISTRY_SIZE       0
 #define configMAX_SYSCALL_INTERRUPT_PRIORITY    1
 
-#define configSUPPORT_STATIC_ALLOCATION 1
-
 #define configMAX_PRIORITIES        ( 10 )
 #define configMAX_CO_ROUTINE_PRIORITIES ( 2 )
+
+#define configSUPPORT_STATIC_ALLOCATION 1
+
+/* Software timer related definitions. */
+#define configUSE_TIMERS                        1
+#define configTIMER_TASK_PRIORITY               configMAX_PRIORITIES - 1
+#define configTIMER_QUEUE_LENGTH                10
+#define configTIMER_TASK_STACK_DEPTH            configMINIMAL_STACK_SIZE
 
 /* Set the following definitions to 1 to include the API function, or zero
  to exclude the API function. */
