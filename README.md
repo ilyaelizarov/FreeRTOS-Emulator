@@ -1,3 +1,12 @@
+Every program made has extensive description how to use it.
+
+Ilya Elizarov
+Matrikelnummer: 03693486
+
+https://github.com/ilyaelizarov/
+
+
+
 2.3 Using the mouse
 
 How does the mouse guarantee thread-safe functionality?
