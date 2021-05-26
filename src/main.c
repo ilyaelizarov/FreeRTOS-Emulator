@@ -174,20 +174,27 @@ char xTidyPrint(uint8_t number) {
 }
 
 /* Prints the output from the four ticking functions:
-   requires a 2D array to fulfill */ 
-void vPrintMsgArray(uint8_t arrayToPrint[][4]) {
+   requires a 2D array to fulfill, last tick number and item number */ 
+void vPrintMsgArray(uint8_t arrayToPrint[][4], uint8_t itemsCounter[]) {
 
 	static char str[100] = { 0 };
 	message_t msgTaskTicks;
 	
     // Get messages from the queue unless it's empty
-	if (uxQueueMessagesWaiting(ticksMsgQueue)) {        
+	if (uxQueueMessagesWaiting(ticksMsgQueue)) {
+
+        tumDrawClear(White);
+
         xQueueReceive(ticksMsgQueue, &msgTaskTicks, portMAX_DELAY);
-        arrayToPrint[msgTaskTicks.tickNo - 1][msgTaskTicks.message - 1] = msgTaskTicks.message;
-	}
+
+        arrayToPrint[msgTaskTicks.tickNo - 1] [ itemsCounter[msgTaskTicks.tickNo - 1] ] = msgTaskTicks.message;
+        itemsCounter[msgTaskTicks.tickNo - 1]++;
+  
+    }
 
     // Print the array of messages
-    for (uint8_t tick = 0; tick < MAX_TICKS; tick++) {
+    for (uint8_t tick = 0; tick < msgTaskTicks.tickNo; tick++) {
+
         sprintf(str, "TickNo: %d, Output: %c%c%c%c", tick + 1,
             xTidyPrint(arrayToPrint[tick][0]),
             xTidyPrint(arrayToPrint[tick][1]),
@@ -307,25 +314,13 @@ void vSwapBuffers(void *pvParameters) {
     xLastWakeTime = xTaskGetTickCount();
     const TickType_t framerateFrequency = FRAME_RATE_FREQUENCY;
 
-   // uint8_t msgArray[MAX_TICKS][4] = { 0 }; // Array to hold messages from the four ticking tasks
-
     tumDrawBindThread(); // Setup Rendering handle with correct GL context
 
     while (1) {
 
         if (xSemaphoreTake(ScreenLock, portMAX_DELAY) == pdTRUE) {
 
-       //     vPrintMsgArray(msgArray); // Print the messages from the ticking functions
-      //    tumDrawClear(White);
-      /*      vDrawFPS();
-            vDrawButtonText(); // Draw keystrokes counter
-            vDrawTextIncrementedVar(); //Draw a variable that increments every second
-            xGetButtonInput(); // Update global input
-            tumEventFetchEvents(FETCH_EVENT_NONBLOCK); // Query events backend for new events, ie. button presses
-            vButtonSwitching(); // Process keyboard input
-*/
             tumDrawUpdateScreen();
-            
             xSemaphoreGive(ScreenLock);
 
         }
@@ -344,7 +339,9 @@ void vPrintTextExercise3 (void *pvParameters) {
     while (1) {
             
             if (xSemaphoreTake(ScreenLock, portMAX_DELAY) == pdTRUE) {
+
             tumDrawFilledBox(0, 350, 640, 130, White); // Clean the text area
+
             vDrawFPS();
             vDrawButtonText(); // Draw keystrokes counter
             vDrawTextIncrementedVar(); //Draw a variable that increments every second
@@ -358,8 +355,29 @@ void vPrintTextExercise3 (void *pvParameters) {
 
             vTaskDelayUntil(&xLastWakeTime, framerateFrequency);
     }
+}
 
+// Prints and processes input for exercise 4
+void vPrintTextExercise4 (void *pvParameters) {
 
+    uint8_t msgArray[MAX_TICKS][4] = { 0 }; // Array to hold messages from the four ticking tasks
+    uint8_t itemsCount[15] = { 0 }; // Number of items for each tick
+
+    TickType_t xLastWakeTime;
+    xLastWakeTime = xTaskGetTickCount();
+    const TickType_t framerateFrequency = FRAME_RATE_FREQUENCY;
+
+    while (1) {
+        
+        if (xSemaphoreTake(ScreenLock, portMAX_DELAY) == pdTRUE) {
+
+        vPrintMsgArray(msgArray, itemsCount);
+        xSemaphoreGive(ScreenLock);
+
+        }
+
+        vTaskDelayUntil(&xLastWakeTime, framerateFrequency);
+    }
 }
 
 // The task that requires a binary semaphore (exercise 3.2.3)
@@ -522,12 +540,13 @@ int main(int argc, char *argv[]) {
     ScreenLock = xSemaphoreCreateMutex();
 
     xTaskCreate(vSwapBuffers, "BufferSwapTask", mainGENERIC_STACK_SIZE, NULL, configMAX_PRIORITIES, BufferSwap);
-    xTaskCreate(vCircleBlink1, "Blinks1Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY + 1, NULL);
-    xTaskCreateStatic(vCircleBlink2, "Blinks2Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY , xStack, &xTaskBuffer);
+   // xTaskCreate(vCircleBlink1, "Blinks1Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY + 1, NULL);
+   // xTaskCreateStatic(vCircleBlink2, "Blinks2Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY , xStack, &xTaskBuffer);
     xTaskCreate(vSwitchingTask1, "SwitchingTask1", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY, NULL);
     xTaskCreate(vSwitchingTask2, "SwitchingTask2", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY +1, &SwitchingTask2);
  
     xTaskCreate(vPrintTextExercise3, "PrintTextExercise3", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY+2, NULL);
+    xTaskCreate(vPrintTextExercise4, "PrintTextExercise4", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY+2, NULL);
 
 
 
@@ -535,13 +554,13 @@ int main(int argc, char *argv[]) {
 
     xTaskCreate(vIncrementVariable, "IncrementVariable", mainGENERIC_STACK_SIZE, NULL, configMAX_PRIORITIES - 1, &IncrementVariable);
 
-    /*
+    
     // Run the ticking tasks (exercise 4.0.2)
     xTaskCreate(vTaskTicks1, "TaskTicks1", mainGENERIC_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(vTaskTicks2, "TaskTicks2", mainGENERIC_STACK_SIZE, NULL, 2, NULL);
     xTaskCreate(vTaskTicks3, "TaskTicks3", mainGENERIC_STACK_SIZE, NULL, 3, NULL);
     xTaskCreate(vTaskTicks4, "TaskTicks4", mainGENERIC_STACK_SIZE, NULL, 4, NULL);
-    */
+    
 
     vTaskStartScheduler();
 
