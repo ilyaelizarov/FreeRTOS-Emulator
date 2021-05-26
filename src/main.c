@@ -26,12 +26,34 @@
 #define mainGENERIC_PRIORITY (tskIDLE_PRIORITY)
 #define MAX_TICKS 15 // Maximum number of ticks for the four ticking tasks (exercise 4.0.2)
 
+// States for state machine
+#define EXERCISE_TWO 0
+#define EXERCISE_THREE 1
+#define EXERCISE_FOUR 2
+
+#define STARTING_STATE EXERCISE_THREE
+
+#define STATE_COUNT 3
+
+#define STATE_QUEUE_LENGTH 1
+
+#define STATE_DEBOUNCE_DELAY 300
+
+const unsigned char next_state_signal = 1;
+
 static TaskHandle_t BufferSwap = NULL;
 static TaskHandle_t SwitchingTask2 = NULL; // Synchronization of the second keystroke counter (exercise 3.2.3)
 static TaskHandle_t IncrementVariable = NULL; // Handles for the tasks for incrementing a variable (exercise 3.2.4)
+static TaskHandle_t CircleBlink1 = NULL;
+static TaskHandle_t SwitchingTask1 = NULL;
+static TaskHandle_t printTextExercise3 = NULL;
+static TaskHandle_t printTextExercise4 = NULL;
+static TaskHandle_t CircleBlink2_dynamic = NULL;
+
 
 static TimerHandle_t xTimer = NULL; // A timer's handle (exercise 3.2.3)
 
+static QueueHandle_t StateQueue = NULL; // State machine queue
 static QueueHandle_t ticksMsgQueue = NULL; // Queue to keep messages for the four ticking tasks (exercise 4.0.2)
 
 
@@ -240,8 +262,14 @@ void vButtonSwitching(void) {
 		        vTaskResume(IncrementVariable);
 	        else
 		        vTaskSuspend(IncrementVariable);
-}
-			
+        }
+		
+        if (buttons.buttons[KEYCODE(E)] && DebouncingCondition()) {
+
+            xQueueSend(StateQueue, &next_state_signal, 0);
+
+        }
+
 		xSemaphoreGive(buttons.lock);
 	
 	}
@@ -269,6 +297,35 @@ void vDrawTextIncrementedVar(void) {
 	tumDrawText(str, SCREEN_WIDTH - 300, SCREEN_HEIGHT - DEFAULT_FONT_SIZE * 3, Black);
     tumDrawText("Push P to pause", SCREEN_WIDTH - 300, SCREEN_HEIGHT - DEFAULT_FONT_SIZE * 2, Black);
 
+}
+
+
+// Checks if the state changing button E was pressed
+void vCheckStateInput(void) {
+
+    if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+
+    	if (buttons.buttons[KEYCODE(E)] && DebouncingCondition()) {
+
+            xSemaphoreGive(buttons.lock);
+            xQueueSend(StateQueue, &next_state_signal, 0);
+        }
+    }
+}
+
+
+// Changes the state forwards
+void changeState(volatile unsigned char *state, unsigned char forwards) {
+
+	if (forwards == 1) {
+	
+        if (*state == STATE_COUNT - 1)
+            *state = 0;
+        else
+            (*state)++;
+
+
+    }
 }
 
 /* ------------------------------- Tasks ------------------------------- */
@@ -349,6 +406,8 @@ void vPrintTextExercise3 (void *pvParameters) {
                  FETCH_EVENT_NO_GL_CHECK); // Query events backend for new events, ie. button presses
             xGetButtonInput(); // Update global input
             vButtonSwitching(); // Process keyboard input
+            
+   //         vCheckStateInput(); // check if the state needs to be changed
 
             xSemaphoreGive(ScreenLock);
             }
@@ -369,12 +428,12 @@ void vPrintTextExercise4 (void *pvParameters) {
 
     while (1) {
         
-        if (xSemaphoreTake(ScreenLock, portMAX_DELAY) == pdTRUE) {
+  //      if (xSemaphoreTake(ScreenLock, portMAX_DELAY) == pdTRUE) {
 
         vPrintMsgArray(msgArray, itemsCount);
-        xSemaphoreGive(ScreenLock);
+   //     xSemaphoreGive(ScreenLock);
 
-        }
+   //     }
 
         vTaskDelayUntil(&xLastWakeTime, framerateFrequency);
     }
@@ -521,6 +580,74 @@ void vTaskTicks4(void *pvParameters) {
 	}	
 }
 
+// State machine
+void vStateMachine(void *pvParameters) {
+
+    unsigned char current_state = STARTING_STATE; // Default state
+    unsigned char state_changed = 1; // Only re-evaluate state if it has changed
+    unsigned char input = 0;
+
+    while (1) {
+        if (state_changed) {
+            goto initial_state;
+        }
+
+        // Handle state machine input
+	    xQueueReceive(StateQueue, &input, portMAX_DELAY);
+        changeState(&current_state, input);
+        state_changed = 1;
+
+initial_state:
+        // Handle current state
+        if (state_changed) {
+
+            switch (current_state) {
+                case EXERCISE_TWO:
+                	vTaskSuspend(printTextExercise4);
+                    vTaskResume(CircleBlink1);
+                	vTaskResume(CircleBlink2_dynamic);
+                    vTaskResume(printTextExercise3);
+                	vTaskResume(SwitchingTask1);
+                	vTaskResume(SwitchingTask2);
+                    vTaskResume(IncrementVariable);
+                    xTimerStart(xTimer, 0);
+                
+			        break;
+                    
+                case EXERCISE_THREE:
+                    vTaskResume(printTextExercise4);
+                    vTaskResume(CircleBlink1);
+                	vTaskResume(CircleBlink2_dynamic);
+                	vTaskResume(SwitchingTask1);
+                	vTaskResume(SwitchingTask2);
+                    vTaskResume(IncrementVariable);
+                    vTaskResume(printTextExercise3);
+                    xTimerStart(xTimer, 0);
+ 
+                    break;
+                        
+                case EXERCISE_FOUR:
+                	vTaskSuspend(CircleBlink1);
+                	vTaskSuspend(CircleBlink2_dynamic);
+                    vTaskSuspend(printTextExercise3);
+                    vTaskResume(printTextExercise4);
+                	vTaskSuspend(SwitchingTask1);
+                	vTaskSuspend(SwitchingTask2);
+                	vTaskSuspend(IncrementVariable);
+                	xTimerStop(xTimer, 0);
+
+                	
+                	break;
+                
+                default:
+                    break;
+            }
+
+            state_changed = 0;
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
 
     char *bin_folder_path = tumUtilGetBinFolderPath(argv[0]);
@@ -536,19 +663,24 @@ int main(int argc, char *argv[]) {
 	xTimer = xTimerCreate("ResetTimer", pdMS_TO_TICKS(15000), pdTRUE, ( void * ) 0, vTimerResetCounter); // Set the timer to 15 sec
 
     ticksMsgQueue = xQueueCreate(8*15, sizeof(message_t)); // Queue for the messages from the ticking functions (exercise 4.0.2)
+    StateQueue = xQueueCreate(STATE_QUEUE_LENGTH, sizeof(unsigned char));
 
     ScreenLock = xSemaphoreCreateMutex();
 
     xTaskCreate(vSwapBuffers, "BufferSwapTask", mainGENERIC_STACK_SIZE, NULL, configMAX_PRIORITIES, BufferSwap);
-   // xTaskCreate(vCircleBlink1, "Blinks1Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY + 1, NULL);
-   // xTaskCreateStatic(vCircleBlink2, "Blinks2Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY , xStack, &xTaskBuffer);
-    xTaskCreate(vSwitchingTask1, "SwitchingTask1", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY, NULL);
+    xTaskCreate(vCircleBlink1, "Blinks1Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY + 1, &CircleBlink1);
+
+    // Static task creatinon (doesn't work with xTaskResume for some reason)
+    // xTaskCreateStatic(vCircleBlink2, "Blinks2Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY , xStack, &CircleBlink2);
+
+   
+    xTaskCreate(vCircleBlink2, "Blinks2Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY, &CircleBlink2_dynamic);
+
+    xTaskCreate(vSwitchingTask1, "SwitchingTask1", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY, &SwitchingTask1);
     xTaskCreate(vSwitchingTask2, "SwitchingTask2", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY +1, &SwitchingTask2);
  
-    xTaskCreate(vPrintTextExercise3, "PrintTextExercise3", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY+2, NULL);
-    xTaskCreate(vPrintTextExercise4, "PrintTextExercise4", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY+2, NULL);
-
-
+    xTaskCreate(vPrintTextExercise3, "PrintTextExercise3", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY+2, &printTextExercise3);
+    xTaskCreate(vPrintTextExercise4, "PrintTextExercise4", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY+2, &printTextExercise4);
 
     xTimerStart(xTimer, 0); // Start the timer
 
@@ -560,6 +692,8 @@ int main(int argc, char *argv[]) {
     xTaskCreate(vTaskTicks2, "TaskTicks2", mainGENERIC_STACK_SIZE, NULL, 2, NULL);
     xTaskCreate(vTaskTicks3, "TaskTicks3", mainGENERIC_STACK_SIZE, NULL, 3, NULL);
     xTaskCreate(vTaskTicks4, "TaskTicks4", mainGENERIC_STACK_SIZE, NULL, 4, NULL);
+
+    xTaskCreate(vStateMachine, "StateMachine", mainGENERIC_STACK_SIZE * 2, NULL, configMAX_PRIORITIES - 2, NULL);
     
 
     vTaskStartScheduler();

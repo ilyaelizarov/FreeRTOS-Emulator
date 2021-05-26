@@ -5,7 +5,7 @@ to provide the memory that is used by the Timer service task. */
 /* This excerpt was taken from https://www.freertos.org/a00110.html without changes */
 
 // Structure that will hold the TCB of the task being created
-StaticTask_t xTaskBuffer;
+StaticTask_t CircleBlink2;
 // Buffer that the task being created will use as its stack
 StackType_t xStack[ mainGENERIC_STACK_SIZE ];
 
