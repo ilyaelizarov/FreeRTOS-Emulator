@@ -17,8 +17,10 @@
 #include "TUM_Event.h"
 #include "TUM_Font.h"
 
+// General parameters
 #define mainGENERIC_PRIORITY (tskIDLE_PRIORITY)
 #define mainGENERIC_STACK_SIZE ((unsigned short)1000)
+#define MAX_TICKS 15 // Maximum number of ticks for the four ticking tasks (exercise 4.0.2)
 
 static TaskHandle_t BufferSwap = NULL;
 
@@ -28,7 +30,7 @@ static TaskHandle_t SwitchingTask1, SwitchingTask2;
 // Handles for the tasks for incrementing a variable
 static TaskHandle_t IncrementVariable;
 
-// Queue to keep messages for the four ticking functions (exercise 4.0.2)
+// Queue to keep messages for the four ticking tasks (exercise 4.0.2)
 static QueueHandle_t ticksMsgQueue = NULL;
 
 // Type for messages between the tasks
@@ -103,6 +105,7 @@ void vApplicationGetIdleTaskMemory( StaticTask_t **ppxIdleTaskTCBBuffer,
 
 #define FPS_AVERAGE_COUNT 50
 
+// Draws text with FPS
 void vDrawFPS(void) {
     static unsigned int periods[FPS_AVERAGE_COUNT] = { 0 };
     static unsigned int periods_total = 0;
@@ -149,7 +152,7 @@ void vDrawFPS(void) {
                               
 }
 
-// Draws a filled circle with constant diameter at given coordinates
+// Draws a filled circle at given coordinates
 void putCircleAt(coord_t * points) {
     
     // Circle diameter
@@ -193,34 +196,44 @@ uint8_t DebouncingCondition (void) {
     }
 }
 
-/* Deletes a task after 15 ticks:
-   needs a pointer where the initialization time of the task is stored */
-void DeleteAfter15Ticks(TickType_t * initialTicks, TickType_t * lastWakeTick) {
-	if (*initialTicks + 15 > *lastWakeTick)
-		vTaskDelete(NULL);
+
+
+/* Returns a char if number is not zero,
+   otherwise returns an empty char */
+char xTidyPrint(uint8_t number) {
+
+    if (number != 0) {
+        return number + '0';
+    } else {
+        return ' ';
+    }
 }
 
-// Print messages from the four ticking functions
-void vPrintTickingMessages(void) {
+/* Prints the output from the four ticking functions:
+   requires a 2D array to fulfill */ 
+void vPrintMsgArray(uint8_t arrayToPrint[][4]) {
 
 	static char str[100] = { 0 };
-
-    int ticksOutput[15][3];
-	
 	message_t msgTaskTicks;
 	
+    // Get messages from the queue unless it's empty
 	if (uxQueueMessagesWaiting(ticksMsgQueue)) {        
         xQueueReceive(ticksMsgQueue, &msgTaskTicks, portMAX_DELAY);
-        ticksOutput[msgTaskTicks.tickNo - 1][msgTaskTicks.message - 1] = msgTaskTicks.message;
-
-
-		sprintf(str, "TickNo: %d, Output: %d", msgTaskTicks.tickNo, msgTaskTicks.message);
-	    tumDrawText(str, 10, DEFAULT_FONT_SIZE * text_newline, Black);
-	
-	    text_newline++;
-
+        arrayToPrint[msgTaskTicks.tickNo - 1][msgTaskTicks.message - 1] = msgTaskTicks.message;
 	}
+
+    // Print the array of messages
+    for (uint8_t tick = 0; tick < MAX_TICKS; tick++) {
+        sprintf(str, "TickNo: %d, Output: %c%c%c%c", tick + 1,
+            xTidyPrint(arrayToPrint[tick][0]),
+            xTidyPrint(arrayToPrint[tick][1]),
+            xTidyPrint(arrayToPrint[tick][2]),
+            xTidyPrint(arrayToPrint[tick][3]));
+
+	    tumDrawText(str, 10, DEFAULT_FONT_SIZE * (tick + 1), Black);
+    } 
 }
+
 
 /* Reacts and shows how many times S have been pushed
  * for task  3.2.3 */
@@ -358,12 +371,14 @@ void vCircleBlink2(void *pvParameters) {
     }
 }
 
-// Refreshes the screen
+// The task refreshes the screen
 void vSwapBuffers(void *pvParameters) {
 
     TickType_t xLastWakeTime;
     xLastWakeTime = xTaskGetTickCount();
     const TickType_t frameratePeriod = 20;
+
+    uint8_t msgArray[MAX_TICKS][4] = { 0 }; // Array to hold messages from the four ticking tasks
 
     tumDrawBindThread(); // Setup Rendering handle with correct GL context
 
@@ -372,7 +387,7 @@ void vSwapBuffers(void *pvParameters) {
             xGetButtonInput(); // Update global input
             vDrawButtonTextSwitching();
             vDrawTextIncrementedVar();
-            vPrintTickingMessages();
+            vPrintMsgArray(msgArray); // Print the array with the messages from the ticking functions
             vDrawFPS();
 
             tumDrawUpdateScreen();
@@ -415,7 +430,7 @@ void vSwitchingTask2 (void *pvParameters) {
 	}
 }
  
-// The task that resets the button's counter
+// The task that resets the button's counter (exercise 3.2.3)
 void vSwitchingTimer (void *pvParameters) {
 
     TickType_t xLastWakeTime;
@@ -460,7 +475,8 @@ void vTaskTicks1 (void *pvParameters) {
 	while(1) {
 		vTaskDelayUntil(&xLastWakeTime, 1);
 
-        if (xLastWakeTime - firstRun > (TickType_t)4)
+        // Suspend the task after 15 ticks
+        if (xLastWakeTime - firstRun > (TickType_t) MAX_TICKS)
 		    vTaskSuspend(NULL);
 		
 		// Write tick number
@@ -469,10 +485,7 @@ void vTaskTicks1 (void *pvParameters) {
 		msgTaskTicks.message = 1;
 		
 		// Send a message
-		xQueueSend(ticksMsgQueue, &msgTaskTicks, portMAX_DELAY); 
-		
-
-//		DeleteAfter15Ticks(&firstRun, &xLastWakeTime);
+		xQueueSend(ticksMsgQueue, &msgTaskTicks, portMAX_DELAY);
 	}	
 }
 
@@ -486,8 +499,9 @@ void vTaskTicks2 (void *pvParameters) {
 	
 	while(1) {
 		vTaskDelayUntil(&xLastWakeTime, 2);
-
-        if (xLastWakeTime - firstRun > (TickType_t)4)
+        
+        // Suspend the task after 15 ticks
+        if (xLastWakeTime - firstRun > (TickType_t) MAX_TICKS)
 		    vTaskSuspend(NULL);
 		
 		// Write tick number
@@ -497,8 +511,56 @@ void vTaskTicks2 (void *pvParameters) {
 		
 		// Send a message
 		xQueueSend(ticksMsgQueue, &msgTaskTicks, portMAX_DELAY);
-		
+	}	
+}
 
+// Task 3 for counting every second tick
+void vTaskTicks3 (void *pvParameters) {
+
+	TickType_t xLastWakeTime, firstRun;
+	xLastWakeTime = firstRun = xTaskGetTickCount();
+	
+	message_t msgTaskTicks;
+	
+	while(1) {
+		vTaskDelayUntil(&xLastWakeTime, 3);
+        
+        // Suspend the task after 15 ticks
+        if (xLastWakeTime - firstRun > (TickType_t) MAX_TICKS)
+		    vTaskSuspend(NULL);
+		
+		// Write tick number
+		msgTaskTicks.tickNo =  xLastWakeTime - firstRun;
+		// Write a message
+		msgTaskTicks.message = 3;
+		
+		// Send a message
+		xQueueSend(ticksMsgQueue, &msgTaskTicks, portMAX_DELAY);
+	}	
+}
+
+// Task 4 for counting every second tick
+void vTaskTicks4(void *pvParameters) {
+
+	TickType_t xLastWakeTime, firstRun;
+	xLastWakeTime = firstRun = xTaskGetTickCount();
+	
+	message_t msgTaskTicks;
+	
+	while(1) {
+		vTaskDelayUntil(&xLastWakeTime, 4);
+        
+        // Suspend the task after 15 ticks
+        if (xLastWakeTime - firstRun > (TickType_t) MAX_TICKS)
+		    vTaskSuspend(NULL);
+		
+		// Write tick number
+		msgTaskTicks.tickNo =  xLastWakeTime - firstRun;
+		// Write a message
+		msgTaskTicks.message = 4;
+		
+		// Send a message
+		xQueueSend(ticksMsgQueue, &msgTaskTicks, portMAX_DELAY);
 	}	
 }
 
@@ -527,6 +589,8 @@ int main(int argc, char *argv[]) {
     // Run the ticking tasks (exercise 4.0.2)
     xTaskCreate(vTaskTicks1, "TaskTicks1", mainGENERIC_STACK_SIZE, NULL, 1, NULL);
     xTaskCreate(vTaskTicks2, "TaskTicks2", mainGENERIC_STACK_SIZE, NULL, 2, NULL);
+    xTaskCreate(vTaskTicks3, "TaskTicks3", mainGENERIC_STACK_SIZE, NULL, 3, NULL);
+    xTaskCreate(vTaskTicks4, "TaskTicks4", mainGENERIC_STACK_SIZE, NULL, 4, NULL);
 
     vTaskStartScheduler();
 
