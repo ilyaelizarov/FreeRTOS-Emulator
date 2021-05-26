@@ -28,6 +28,15 @@ static TaskHandle_t SwitchingTask1, SwitchingTask2;
 // Handles for the tasks for incrementing a variable
 static TaskHandle_t IncrementVariable;
 
+// Queue to keep messages for the four ticking functions (exercise 4.0.2)
+static QueueHandle_t ticksMsgQueue = NULL;
+
+// Type for messages between the tasks
+typedef struct {
+	TickType_t tickNo;
+	uint8_t message;
+} message_t;
+
 /* A protected variable for counting button's pushes
    when we switch between the tasks in exercise 3.2.3 */
 typedef struct switchingButtonCounter {
@@ -42,6 +51,9 @@ TickType_t buttons_last_change;
 
 // A variable to be incremented (task 3.2.4)
 int variableToIncrement = 0;
+
+// Counter for new lines of text
+static uint8_t text_newline = 1;
 
 // Semaphore to resume vSwitchingTask1 in exercise 3.2.3
 SemaphoreHandle_t semSwitchingTask1 = NULL;
@@ -179,6 +191,35 @@ uint8_t DebouncingCondition (void) {
     } else {
         return 0;
     }
+}
+
+/* Deletes a task after 15 ticks:
+   needs a pointer where the initialization time of the task is stored */
+void DeleteAfter15Ticks(TickType_t * initialTicks, TickType_t * lastWakeTick) {
+	if (*initialTicks + 15 > *lastWakeTick)
+		vTaskDelete(NULL);
+}
+
+// Print messages from the four ticking functions
+void vPrintTickingMessages(void) {
+
+	static char str[100] = { 0 };
+
+    int ticksOutput[15][3];
+	
+	message_t msgTaskTicks;
+	
+	if (uxQueueMessagesWaiting(ticksMsgQueue)) {        
+        xQueueReceive(ticksMsgQueue, &msgTaskTicks, portMAX_DELAY);
+        ticksOutput[msgTaskTicks.tickNo - 1][msgTaskTicks.message - 1] = msgTaskTicks.message;
+
+
+		sprintf(str, "TickNo: %d, Output: %d", msgTaskTicks.tickNo, msgTaskTicks.message);
+	    tumDrawText(str, 10, DEFAULT_FONT_SIZE * text_newline, Black);
+	
+	    text_newline++;
+
+	}
 }
 
 /* Reacts and shows how many times S have been pushed
@@ -331,6 +372,7 @@ void vSwapBuffers(void *pvParameters) {
             xGetButtonInput(); // Update global input
             vDrawButtonTextSwitching();
             vDrawTextIncrementedVar();
+            vPrintTickingMessages();
             vDrawFPS();
 
             tumDrawUpdateScreen();
@@ -406,6 +448,60 @@ void vIncrementVariable (void *pvParameters) {
 	}	
 }
 
+
+// Task 1 for counting every first tick
+void vTaskTicks1 (void *pvParameters) {
+
+	TickType_t xLastWakeTime, firstRun;
+	xLastWakeTime = firstRun = xTaskGetTickCount();
+	
+	message_t msgTaskTicks;
+	
+	while(1) {
+		vTaskDelayUntil(&xLastWakeTime, 1);
+
+        if (xLastWakeTime - firstRun > (TickType_t)4)
+		    vTaskSuspend(NULL);
+		
+		// Write tick number
+		msgTaskTicks.tickNo =  xLastWakeTime - firstRun;
+		// Write a message
+		msgTaskTicks.message = 1;
+		
+		// Send a message
+		xQueueSend(ticksMsgQueue, &msgTaskTicks, portMAX_DELAY); 
+		
+
+//		DeleteAfter15Ticks(&firstRun, &xLastWakeTime);
+	}	
+}
+
+// Task 2 for counting every second tick
+void vTaskTicks2 (void *pvParameters) {
+
+	TickType_t xLastWakeTime, firstRun;
+	xLastWakeTime = firstRun = xTaskGetTickCount();
+	
+	message_t msgTaskTicks;
+	
+	while(1) {
+		vTaskDelayUntil(&xLastWakeTime, 2);
+
+        if (xLastWakeTime - firstRun > (TickType_t)4)
+		    vTaskSuspend(NULL);
+		
+		// Write tick number
+		msgTaskTicks.tickNo =  xLastWakeTime - firstRun;
+		// Write a message
+		msgTaskTicks.message = 2;
+		
+		// Send a message
+		xQueueSend(ticksMsgQueue, &msgTaskTicks, portMAX_DELAY);
+		
+
+	}	
+}
+
 int main(int argc, char *argv[]) {
 
     char *bin_folder_path = tumUtilGetBinFolderPath(argv[0]);
@@ -418,6 +514,7 @@ int main(int argc, char *argv[]) {
     semSwitchingTask1 = xSemaphoreCreateBinary(); // Locking mechanism for the first task in the exercise 3.2.3
     buttonCounter.lock = xSemaphoreCreateMutex(); // Mutex to protect buttonCounter.counter
     buttons.lock = xSemaphoreCreateMutex(); // Locking mechanism for buttons
+    ticksMsgQueue = xQueueCreate(8*15, sizeof(message_t)); // Queue for the messages from the four ticking functions
 
     xTaskCreate(vSwapBuffers, "BufferSwapTask", mainGENERIC_STACK_SIZE, NULL, configMAX_PRIORITIES, BufferSwap); // highest priority
     xTaskCreate(vCircleBlink1, "Blinks1Hz", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY + 1, NULL); // normal priority
@@ -426,6 +523,10 @@ int main(int argc, char *argv[]) {
     xTaskCreate(vSwitchingTask2, "SwitchingTask2", mainGENERIC_STACK_SIZE, NULL, mainGENERIC_PRIORITY +1, &SwitchingTask2);
     xTaskCreate(vSwitchingTimer, "SwitchingTimer", mainGENERIC_STACK_SIZE, NULL, configMAX_PRIORITIES - 1, NULL); // higher priority
     xTaskCreate(vIncrementVariable, "IncrementVariable", mainGENERIC_STACK_SIZE, NULL, configMAX_PRIORITIES - 1, &IncrementVariable);
+
+    // Run the ticking tasks (exercise 4.0.2)
+    xTaskCreate(vTaskTicks1, "TaskTicks1", mainGENERIC_STACK_SIZE, NULL, 1, NULL);
+    xTaskCreate(vTaskTicks2, "TaskTicks2", mainGENERIC_STACK_SIZE, NULL, 2, NULL);
 
     vTaskStartScheduler();
 
